@@ -436,6 +436,13 @@ if prompt_yes_no "Use Tailscale for secure private networking? [y/N]: " "n"; the
   TAILSCALE_ENABLED=true
 fi
 
+# Broker credentials are never typed by the user — the API and the bots are the only clients —
+# so generate a strong one instead of shipping a well-known default. Rotating it later requires
+# `make emqx-auth-reset`, since EMQX only imports the bootstrap file for users it does not have.
+# EMQX rejects single-character-class passwords for the dashboard, so compose the value from
+# letters and digits explicitly rather than trusting a random alphanumeric draw to contain both.
+BROKER_PASSWORD="$(LC_ALL=C tr -dc 'A-Za-z' < /dev/urandom | head -c 24)$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 8)"
+
 cat > .env << EOF
 # Hummingbot API Configuration
 USERNAME=$USERNAME
@@ -447,7 +454,7 @@ DEBUG_MODE=false
 BROKER_HOST=localhost
 BROKER_PORT=1883
 BROKER_USERNAME=admin
-BROKER_PASSWORD=password
+BROKER_PASSWORD=$BROKER_PASSWORD
 
 # Database (auto-configured by docker-compose)
 DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/hummingbot_api

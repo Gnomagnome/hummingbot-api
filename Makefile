@@ -1,4 +1,4 @@
-.PHONY: setup run deploy stop install uninstall build install-pre-commit tailscale-status reset
+.PHONY: setup run deploy stop install uninstall build install-pre-commit tailscale-status reset emqx-auth emqx-auth-reset
 
 SETUP_SENTINEL := .setup-complete
 
@@ -11,7 +11,7 @@ $(SETUP_SENTINEL):
 # Run locally (dev mode)
 # When TAILSCALE_ENABLED=true: installs Tailscale if needed, connects, configures tailscale serve,
 # then binds uvicorn to 127.0.0.1 only (tailscale serve exposes port 8000 on the tailnet)
-run:
+run: emqx-auth
 	docker compose up emqx postgres -d
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	if [ "$${TAILSCALE_ENABLED:-false}" = "true" ]; then \
@@ -34,7 +34,7 @@ run:
 
 # Deploy with Docker
 # When TAILSCALE_ENABLED=true: adds the Tailscale sidecar compose override
-deploy: $(SETUP_SENTINEL)
+deploy: $(SETUP_SENTINEL) emqx-auth
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	if [ "$${TAILSCALE_ENABLED:-false}" = "true" ]; then \
 		echo "[INFO] Deploying with Tailscale sidecar..."; \
@@ -42,6 +42,39 @@ deploy: $(SETUP_SENTINEL)
 	else \
 		docker compose up -d; \
 	fi
+
+EMQX_AUTH_FILE := .emqx/auth-bootstrap.csv
+
+# Generate the EMQX built-in-database bootstrap file from the broker credentials in .env.
+# EMQX ships with anonymous MQTT enabled; this seeds the one account the API and the bots
+# use so the broker can reject everything else. The file holds a plaintext password, so it
+# is written 0600 and gitignored.
+#
+# NOTE: EMQX imports the bootstrap file only for users that do not already exist. Changing
+# BROKER_PASSWORD in .env therefore has no effect on a broker whose emqx-data volume already
+# has the account — run `make emqx-auth-reset` to drop the volume and re-seed.
+emqx-auth:
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	mkdir -p $(dir $(EMQX_AUTH_FILE)); \
+	printf 'user_id,password,is_superuser\n%s,%s,true\n' \
+		"$${BROKER_USERNAME:-admin}" "$${BROKER_PASSWORD:-password}" > $(EMQX_AUTH_FILE); \
+	chmod 600 $(EMQX_AUTH_FILE); \
+	echo "[INFO] Wrote $(EMQX_AUTH_FILE) for broker user $${BROKER_USERNAME:-admin}"
+
+# Compose derives the project name from the directory name unless COMPOSE_PROJECT_NAME is set.
+COMPOSE_PROJECT ?= $(notdir $(CURDIR))
+
+# Rotate the broker credentials: wipe the EMQX state volume so the bootstrap file is
+# re-imported with the current .env values. Retained messages and broker state are lost;
+# bots and the API reconnect on their own. The volume is matched by compose labels rather
+# than by name, since other compose projects on the same host also have emqx volumes.
+emqx-auth-reset: emqx-auth
+	docker compose rm -sf emqx
+	@docker volume ls -q \
+		--filter "label=com.docker.compose.project=$(COMPOSE_PROJECT)" \
+		--filter "label=com.docker.compose.volume=emqx-data" \
+		| xargs -r docker volume rm
+	docker compose up -d emqx
 
 TAILSCALE_CONTAINER := hummingbot-tailscale
 
