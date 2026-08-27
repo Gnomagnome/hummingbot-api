@@ -58,13 +58,15 @@ services:
       - emqx-log:/opt/emqx/log
       - emqx-etc:/opt/emqx/etc
     ports:
-      - "1883:1883"  # mqtt:tcp
-      - "8883:8883"  # mqtt:tcp:ssl
-      - "8083:8083"  # mqtt:ws
-      - "8084:8084"  # mqtt:ws:ssl
-      - "8081:8081"  # http:management
-      - "18083:18083"  # http:dashboard
-      - "61613:61613"  # web-stomp gateway
+      # SEC: loopback-only. Bot containers run with network_mode="host" and reach the
+      # broker at 127.0.0.1:1883; hummingbot-api reaches it in-network as emqx:1883.
+      # Neither path needs the broker published on a routable interface — and with the
+      # Tailscale overlay in play, 0.0.0.0 meant "reachable from the whole tailnet".
+      - "127.0.0.1:1883:1883"  # mqtt:tcp
+      - "127.0.0.1:18083:18083"  # http:dashboard
+      # 8883 (mqtt:ssl), 8083/8084 (mqtt:ws), 8081 (http:management) and 61613 (web-stomp)
+      # are not used by this project — conf_client.yml sets mqtt_ssl: false and the API
+      # speaks plain TCP MQTT. Left unpublished to keep the attack surface minimal.
     networks:
       emqx-bridge:
         aliases:
