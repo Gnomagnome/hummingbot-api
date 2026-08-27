@@ -71,8 +71,15 @@ After hummingbot-api is running, these services are available:
 | **API** | http://localhost:8000 | http://hummingbot-api:8000 | REST API |
 | **Swagger UI** | http://localhost:8000/docs | http://hummingbot-api:8000/docs | Interactive API documentation |
 | **PostgreSQL** | localhost:5432 | — | Database |
-| **EMQX** | localhost:1883 | — | MQTT broker |
-| **EMQX Dashboard** | http://localhost:18083 | — | Broker admin (admin/public) |
+| **EMQX** | 127.0.0.1:1883 | — | MQTT broker (auth required, loopback-only) |
+| **EMQX Dashboard** | http://127.0.0.1:18083 | — | Broker admin (`admin` / `BROKER_PASSWORD`) |
+
+> **Broker access.** The broker requires a username and password and is published on the loopback
+> interface only — bot containers run with `network_mode: host` and reach it at `127.0.0.1:1883`,
+> while the API reaches it in-network as `emqx:1883`. Credentials come from `BROKER_USERNAME` /
+> `BROKER_PASSWORD` in `.env`; `make deploy` seeds them into the broker via `make emqx-auth`.
+> To change them afterwards, edit `.env` and run `make emqx-auth-reset` — EMQX only imports the
+> bootstrap file for accounts it does not already have.
 
 ## Connect AI Assistant (MCP)
 
