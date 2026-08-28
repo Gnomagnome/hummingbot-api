@@ -50,13 +50,16 @@ EMQX_AUTH_FILE := .emqx/auth-bootstrap.csv
 # use so the broker can reject everything else. The file holds a plaintext password, so it
 # is written 0600 and gitignored.
 #
+# is_superuser is deliberately false: EMQX superusers bypass authorization entirely, which
+# would make emqx/acl.conf dead config.
+#
 # NOTE: EMQX imports the bootstrap file only for users that do not already exist. Changing
 # BROKER_PASSWORD in .env therefore has no effect on a broker whose emqx-data volume already
 # has the account — run `make emqx-auth-reset` to drop the volume and re-seed.
 emqx-auth:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	mkdir -p $(dir $(EMQX_AUTH_FILE)); \
-	printf 'user_id,password,is_superuser\n%s,%s,true\n' \
+	printf 'user_id,password,is_superuser\n%s,%s,false\n' \
 		"$${BROKER_USERNAME:-admin}" "$${BROKER_PASSWORD:-password}" > $(EMQX_AUTH_FILE); \
 	chmod 600 $(EMQX_AUTH_FILE); \
 	echo "[INFO] Wrote $(EMQX_AUTH_FILE) for broker user $${BROKER_USERNAME:-admin}"
