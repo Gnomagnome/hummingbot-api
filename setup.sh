@@ -459,6 +459,12 @@ BROKER_PASSWORD=$BROKER_PASSWORD
 # Database (auto-configured by docker-compose)
 DATABASE_URL=postgresql+asyncpg://hbot:hummingbot-api@localhost:5432/hummingbot_api
 
+# Published-port bind addresses. Both default to 127.0.0.1 in docker-compose.yml.
+# Widen API_BIND only if something off-box must reach the API, and prefer a specific
+# interface over 0.0.0.0 — e.g. API_BIND=<your-tailscale-ip> with the Tailscale overlay.
+# API_BIND=127.0.0.1
+# DB_BIND=127.0.0.1
+
 # Gateway (optional)
 GATEWAY_URL=http://localhost:15888
 GATEWAY_PASSPHRASE=admin
