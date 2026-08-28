@@ -1,4 +1,4 @@
-.PHONY: setup run deploy stop install uninstall build install-pre-commit tailscale-status reset emqx-auth emqx-auth-reset
+.PHONY: setup run deploy stop install uninstall build install-pre-commit tailscale-status reset emqx-auth emqx-auth-reset emqx-audit
 
 SETUP_SENTINEL := .setup-complete
 
@@ -63,6 +63,42 @@ emqx-auth:
 		"$${BROKER_USERNAME:-admin}" "$${BROKER_PASSWORD:-password}" > $(EMQX_AUTH_FILE); \
 	chmod 600 $(EMQX_AUTH_FILE); \
 	echo "[INFO] Wrote $(EMQX_AUTH_FILE) for broker user $${BROKER_USERNAME:-admin}"
+
+# Broker container to audit. Override to check another deployment:
+#   make emqx-audit EMQX_CONTAINER=<name>
+EMQX_CONTAINER ?= hummingbot-broker
+
+# Audit the broker's security posture and check for persistence.
+#
+# EMQX's rule engine can issue authenticated HTTP requests to internal services, so a rule
+# or connector nobody added is a backdoor, not a curiosity — and it survives restarts in
+# cluster.hocon. Installing one requires a dashboard session, which is why the well-known
+# admin/public default mattered. This prints everything needed to answer "is anything here
+# that we did not put here", in one command.
+emqx-audit:
+	@echo "── listeners ────────────────────────────────────────────────"
+	@docker exec $(EMQX_CONTAINER) /opt/emqx/bin/emqx ctl listeners 2>/dev/null \
+		| grep -E "^[a-z]|listen_on|current_conn" || echo "  broker not running"
+	@echo "── published ports (host side) ──────────────────────────────"
+	@docker port $(EMQX_CONTAINER) 2>/dev/null || true
+	@echo "── authentication (empty list == anonymous allowed) ─────────"
+	@docker exec $(EMQX_CONTAINER) /opt/emqx/bin/emqx ctl conf show authentication 2>/dev/null || true
+	@echo "── authorization (want no_match = deny) ─────────────────────"
+	@docker exec $(EMQX_CONTAINER) /opt/emqx/bin/emqx ctl conf show authorization 2>/dev/null || true
+	@echo "── ACL rules in force ───────────────────────────────────────"
+	@docker exec $(EMQX_CONTAINER) sh -c 'grep -E "^\{" /opt/emqx/etc/acl.conf' 2>/dev/null || true
+	@echo "── PERSISTENCE: rules / actions / connectors / bridges ──────"
+	@echo "   A rule here can make the broker issue authenticated HTTP requests"
+	@echo "   into internal services. Anything you did not add is a backdoor."
+	@docker exec $(EMQX_CONTAINER) sh -c \
+		"awk '/^(actions|connectors|bridges|rule_engine) \\{/{p=1} p{print} /^\\}/{if(p){p=0;print \"\"}}' \
+		 /opt/emqx/data/configs/cluster.hocon 2>/dev/null \
+		 | grep -vE 'created_at|last_modified|metadata'" \
+		2>/dev/null | sed 's/^/   /' || true
+	@docker exec $(EMQX_CONTAINER) sh -c \
+		"grep -qE '^(actions|connectors|bridges) \\{|rules \\{' /opt/emqx/data/configs/cluster.hocon 2>/dev/null" \
+		&& echo "   ^^ REVIEW THE ABOVE — stock deployments have none of these." \
+		|| echo "   none — no rules, actions, connectors or bridges configured."
 
 # Compose derives the project name from the directory name unless COMPOSE_PROJECT_NAME is set.
 COMPOSE_PROJECT ?= $(notdir $(CURDIR))
