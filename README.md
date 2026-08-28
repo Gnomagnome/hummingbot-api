@@ -80,6 +80,18 @@ After hummingbot-api is running, these services are available:
 > `BROKER_PASSWORD` in `.env`; `make deploy` seeds them into the broker via `make emqx-auth`.
 > To change them afterwards, edit `.env` and run `make emqx-auth-reset` — EMQX only imports the
 > bootstrap file for accounts it does not already have.
+>
+> The broker also denies every topic outside `hbot/#` and `hummingbot-api/response/#`
+> (`emqx/acl.conf`), so a leaked broker credential cannot be used to read the whole bus or to
+> drive the rule engine. Run **`make emqx-audit`** to print the broker's listeners, auth,
+> authorization and any rules, actions, connectors or bridges — a rule nobody added can make
+> the broker issue authenticated HTTP requests into internal services, and it survives
+> restarts. Use `make emqx-audit EMQX_CONTAINER=<name>` to check another deployment.
+
+> **Ports.** The API (`8000`) and Postgres (`5432`) also bind to `127.0.0.1` by default. Set
+> `API_BIND` in `.env` if something off-box must reach the API — prefer a specific interface
+> over `0.0.0.0`; with the Tailscale overlay, `API_BIND=<tailscale-ip>` keeps MagicDNS working
+> without publishing the API to the internet.
 
 ## Connect AI Assistant (MCP)
 
