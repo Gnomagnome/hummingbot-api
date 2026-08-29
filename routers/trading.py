@@ -1,10 +1,10 @@
 import logging
 import math
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, TradeType
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette import status
 
 from deps import get_accounts_service, get_connector_service, get_trading_history_service
@@ -21,12 +21,68 @@ from models import (
 from models.accounts import LeverageRequest, PositionModeRequest
 from models.pagination import paginate_by_cursor
 from services.accounts_service import AccountsService
+from services.hyperliquid_protected_orders import (
+    CLOID_PATTERN,
+    lookup_order_by_cloid,
+    place_protected_order,
+)
 from services.trading_history_service import TradingHistoryService
 
 # Create module-specific logger
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Trading"], prefix="/trading")
+
+
+class ProtectedOrderLeg(BaseModel):
+    role: Literal["ENTRY", "STOP"]
+    cloid: str = Field(pattern=CLOID_PATTERN)
+    side: Literal["BUY", "SELL"]
+    amount: str
+    reduce_only: bool
+    limit_price: str
+    order_type: Dict[str, Any]
+
+
+class ProtectedHyperliquidRequest(BaseModel):
+    request_id: str = Field(min_length=8, max_length=128)
+    executor_id: str = Field(pattern=r"^condor-real-[0-9a-f]{32}$")
+    controller_id: str = Field(min_length=1, max_length=128)
+    account_name: Literal["master_account"]
+    connector_name: Literal["hyperliquid_perpetual"]
+    trading_pair: str = Field(min_length=3, max_length=128)
+    grouping: Literal["na"]
+    orders: List[ProtectedOrderLeg] = Field(min_length=2, max_length=2)
+
+
+@router.get("/hyperliquid/protected-orders/capabilities")
+async def get_hyperliquid_protected_order_capabilities():
+    return {
+        "contract": "condor-hyperliquid-protected-v1",
+        "grouping": "na",
+        "mutation_posts": 1,
+        "read_recovery": "orderStatus-by-cloid",
+    }
+
+
+@router.post("/hyperliquid/protected-orders", status_code=status.HTTP_201_CREATED)
+async def place_hyperliquid_protected_order(
+    request: ProtectedHyperliquidRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(request.account_name, request.connector_name)
+    return await place_protected_order(connector, request.model_dump())
+
+
+@router.get("/hyperliquid/protected-orders/status")
+async def get_hyperliquid_protected_order_status(
+    account_name: Literal["master_account"],
+    connector_name: Literal["hyperliquid_perpetual"],
+    cloid: str = Query(pattern=CLOID_PATTERN),
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(account_name, connector_name)
+    return await lookup_order_by_cloid(connector, cloid)
 
 
 # Trade Execution
@@ -120,7 +176,7 @@ async def cancel_order(
 async def get_positions(
     filter_request: PositionFilterRequest,
     accounts_service: AccountsService = Depends(get_accounts_service),
-    connector_service = Depends(get_connector_service)
+    connector_service=Depends(get_connector_service),
 ):
     """
     Get current positions across all or filtered perpetual connectors.
@@ -177,10 +233,7 @@ async def get_positions(
 
 # Active Orders Management - Real-time from connectors
 @router.post("/orders/active", response_model=PaginatedResponse)
-async def get_active_orders(
-    filter_request: ActiveOrderFilterRequest,
-    connector_service = Depends(get_connector_service)
-):
+async def get_active_orders(filter_request: ActiveOrderFilterRequest, connector_service=Depends(get_connector_service)):
     """
     Get active (in-flight) orders across all or filtered accounts and connectors.
 
@@ -247,7 +300,7 @@ async def get_active_orders(
 async def get_orders(
     filter_request: OrderFilterRequest,
     trading_history_service: TradingHistoryService = Depends(get_trading_history_service),
-    connector_service = Depends(get_connector_service)
+    connector_service=Depends(get_connector_service),
 ):
     """
     Get historical order data across all or filtered accounts from the database/registry.
@@ -323,7 +376,7 @@ async def get_orders(
 async def get_trades(
     filter_request: TradeFilterRequest,
     trading_history_service: TradingHistoryService = Depends(get_trading_history_service),
-    connector_service = Depends(get_connector_service)
+    connector_service=Depends(get_connector_service),
 ):
     """
     Get trade history across all or filtered accounts with complex filtering.
@@ -499,7 +552,7 @@ async def set_leverage(
 async def get_funding_payments(
     filter_request: FundingPaymentFilterRequest,
     trading_history_service: TradingHistoryService = Depends(get_trading_history_service),
-    connector_service = Depends(get_connector_service)
+    connector_service=Depends(get_connector_service),
 ):
     """
     Get funding payment history across all or filtered perpetual connectors.
@@ -617,9 +670,22 @@ def _standardize_in_flight_order_response(order, account_name: str, connector_na
         "amount": float(order.amount) if order.amount and not math.isnan(float(order.amount)) else 0,
         "price": float(order.price) if order.price and not math.isnan(float(order.price)) else None,
         "status": status,
-        "filled_amount": float(getattr(order, "executed_amount_base", 0) or 0) if not math.isnan(float(getattr(order, "executed_amount_base", 0) or 0)) else 0,
-        "average_fill_price": float(getattr(order, "last_executed_price", 0)) if getattr(order, "last_executed_price", None) and not math.isnan(float(getattr(order, "last_executed_price", 0))) else None,
-        "fee_paid": float(getattr(order, "cumulative_fee_paid_quote", 0)) if getattr(order, "cumulative_fee_paid_quote", None) and not math.isnan(float(getattr(order, "cumulative_fee_paid_quote", 0))) else None,
+        "filled_amount": (
+            float(getattr(order, "executed_amount_base", 0) or 0)
+            if not math.isnan(float(getattr(order, "executed_amount_base", 0) or 0))
+            else 0
+        ),
+        "average_fill_price": (
+            float(getattr(order, "last_executed_price", 0))
+            if getattr(order, "last_executed_price", None) and not math.isnan(float(getattr(order, "last_executed_price", 0)))
+            else None
+        ),
+        "fee_paid": (
+            float(getattr(order, "cumulative_fee_paid_quote", 0))
+            if getattr(order, "cumulative_fee_paid_quote", None)
+            and not math.isnan(float(getattr(order, "cumulative_fee_paid_quote", 0)))
+            else None
+        ),
         "fee_currency": None,  # InFlightOrder doesn't store fee currency directly
         "created_at": created_at,
         "updated_at": updated_at,
