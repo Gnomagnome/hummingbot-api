@@ -1,0 +1,66 @@
+name: Reproducible runtime
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Verify immutable build inputs
+        id: lock
+        run: |
+          OUTPUT="$(python3 scripts/verify_supply_chain.py)"
+          echo "$OUTPUT"
+          echo "digest=${OUTPUT#LOCK_SET_SHA256=}" >> "$GITHUB_OUTPUT"
+
+      - name: Clean build A
+        run: |
+          docker build --pull --no-cache \
+            --build-arg TARGETARCH=amd64 \
+            --build-arg FORK_SOURCE_SHA="$SOURCE_SHA" \
+            --build-arg DEPENDENCY_LOCK_SHA256="${{ steps.lock.outputs.digest }}" \
+            --tag hummingbot-api-runtime:a .
+
+      - name: Clean build B
+        run: |
+          docker build --pull --no-cache \
+            --build-arg TARGETARCH=amd64 \
+            --build-arg FORK_SOURCE_SHA="$SOURCE_SHA" \
+            --build-arg DEPENDENCY_LOCK_SHA256="${{ steps.lock.outputs.digest }}" \
+            --tag hummingbot-api-runtime:b .
+
+      - name: Compare identity labels and runtime dependency inventories
+        run: |
+          docker image inspect --format '{{json .Config.Labels}}' hummingbot-api-runtime:a > labels-a.json
+          docker image inspect --format '{{json .Config.Labels}}' hummingbot-api-runtime:b > labels-b.json
+          python3 scripts/verify_supply_chain.py --image-labels labels-a.json "$SOURCE_SHA" "${{ steps.lock.outputs.digest }}"
+          python3 scripts/verify_supply_chain.py --image-labels labels-b.json "$SOURCE_SHA" "${{ steps.lock.outputs.digest }}"
+          cmp labels-a.json labels-b.json
+          docker run --rm --entrypoint python \
+            --volume "$PWD:/source:ro" hummingbot-api-runtime:a \
+            /source/scripts/runtime_inventory.py > inventory-a.json
+          docker run --rm --entrypoint python \
+            --volume "$PWD:/source:ro" hummingbot-api-runtime:b \
+            /source/scripts/runtime_inventory.py > inventory-b.json
+          cmp inventory-a.json inventory-b.json
+
+      - name: Run fake-only protected-order contract tests
+        run: |
+          docker run --rm --entrypoint python \
+            --volume "$PWD:/source:ro" hummingbot-api-runtime:a \
+            /source/scripts/run_fake_protected_tests.py

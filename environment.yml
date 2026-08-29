@@ -1,9 +1,24 @@
 name: hummingbot-api
+# This file is the human-maintained solve input only. Production images install
+# the generated explicit locks under locks/ and never solve this file at build
+# time.
+platforms:
+  - linux-64
+  - linux-aarch64
 channels:
   - conda-forge
   - defaults
 dependencies:
   - python=3.12
+  # Build/runtime system dependencies live in the same resolved graph so the
+  # Docker build does not depend on mutable APT repositories.
+  - c-compiler
+  - cxx-compiler
+  - make
+  - libusb
+  - cython
+  - setuptools
+  - wheel
   - fastapi
   - uvicorn
   - boto3
