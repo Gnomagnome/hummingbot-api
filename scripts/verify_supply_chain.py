@@ -68,6 +68,9 @@ def verify_sources() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     environment = (ROOT / "environment.yml").read_text(encoding="utf-8")
+    publish_workflow = (
+        ROOT / ".github" / "workflows" / "docker_buildx_workflow.yml"
+    ).read_text(encoding="utf-8")
     workflows = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
@@ -89,6 +92,14 @@ def verify_sources() -> None:
     for image in ("emqx:5@sha256:", "postgres:16@sha256:"):
         require(image in compose, f"Compose image is not digest-pinned: {image.split('@')[0]}")
     require(":latest" not in workflows, "image publishing still emits a latest tag")
+    require(
+        "workflow_dispatch:" in publish_workflow and "pull_request:" not in publish_workflow,
+        "registry publishing must require an explicit operator dispatch",
+    )
+    require(
+        "hummingbot/hummingbot-api:sha-${{ env.SOURCE_SHA }}" in publish_workflow,
+        "registry publishing does not use the exact source-SHA tag",
+    )
 
 
 def verify_image_labels(path: Path, source_sha: str, dependency_lock_sha: str) -> None:

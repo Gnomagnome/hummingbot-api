@@ -1,25 +1,34 @@
-name: Hummingbot-API immutable Docker publish
+name: Operator-authorized immutable Docker publish
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact Gnomagnome/hummingbot-api main commit SHA to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
-  SOURCE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
 
 jobs:
   build_and_push:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact merged source
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+
+      - name: Require exact source on main
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
 
       - name: Verify immutable build inputs
         id: lock
