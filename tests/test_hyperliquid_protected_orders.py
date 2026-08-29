@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from services.hyperliquid_protected_orders import (
+    connector_account_address,
     lookup_order_by_cloid,
     normalize_order_status,
     place_protected_order,
@@ -89,6 +90,12 @@ class Connector:
     async def _api_post(self, **kwargs):
         self.posts.append(kwargs)
         return self.responses.pop(0)
+
+
+def test_capability_attests_the_connector_public_account_address():
+    connector = Connector([])
+    connector._auth._api_address = "0x3003A55B5140F63A260A8C0324390D30319C65BD"
+    assert connector_account_address(connector) == ("0x3003a55b5140f63a260a8c0324390d30319c65bd")
 
 
 @pytest.mark.asyncio

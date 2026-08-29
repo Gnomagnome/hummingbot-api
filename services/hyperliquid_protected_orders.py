@@ -9,8 +9,21 @@ from typing import Any, Mapping
 from fastapi import HTTPException
 
 CLOID_PATTERN = r"^0x[0-9a-f]{32}$"
+ADDRESS_PATTERN = r"^0x[0-9a-f]{40}$"
 CREATE_ORDER_URL = "/exchange"
 ORDER_STATUS_URL = "/info"
+
+
+def connector_account_address(connector: Any) -> str:
+    """Return the public account whose orders/statuses this connector owns."""
+    address = str(getattr(getattr(connector, "_auth", None), "_api_address", ""))
+    address = address.strip().lower()
+    if not re.fullmatch(ADDRESS_PATTERN, address):
+        raise HTTPException(
+            status_code=503,
+            detail="Hyperliquid connector public account address is unavailable",
+        )
+    return address
 
 
 def _float_to_wire(value: Any) -> str:

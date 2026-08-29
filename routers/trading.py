@@ -23,6 +23,7 @@ from models.pagination import paginate_by_cursor
 from services.accounts_service import AccountsService
 from services.hyperliquid_protected_orders import (
     CLOID_PATTERN,
+    connector_account_address,
     lookup_order_by_cloid,
     place_protected_order,
 )
@@ -56,12 +57,18 @@ class ProtectedHyperliquidRequest(BaseModel):
 
 
 @router.get("/hyperliquid/protected-orders/capabilities")
-async def get_hyperliquid_protected_order_capabilities():
+async def get_hyperliquid_protected_order_capabilities(
+    account_name: Literal["master_account"],
+    connector_name: Literal["hyperliquid_perpetual"],
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(account_name, connector_name)
     return {
         "contract": "condor-hyperliquid-protected-v1",
         "grouping": "na",
         "mutation_posts": 1,
         "read_recovery": "orderStatus-by-cloid",
+        "account_address": connector_account_address(connector),
     }
 
 
