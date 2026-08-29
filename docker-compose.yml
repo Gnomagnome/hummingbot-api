@@ -1,7 +1,9 @@
 services:
   hummingbot-api:
     container_name: hummingbot-api
-    image: hummingbot/hummingbot-api:latest
+    # Required: exact source-SHA tag for readability, or (preferred for an
+    # operator launch) the immutable registry digest produced by CI.
+    image: ${HUMMINGBOT_API_IMAGE:?set HUMMINGBOT_API_IMAGE to an exact SHA tag or immutable digest}
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -45,7 +47,7 @@ services:
       - postgres
   emqx:
     container_name: hummingbot-broker
-    image: emqx:5
+    image: emqx:5@sha256:11efadd3e7ae665d39a7a7838ac0c783bb7bb80abb3c0efcc8fd8f80c45b0209
     restart: unless-stopped
     environment:
       - EMQX_NAME=emqx
@@ -76,7 +78,7 @@ services:
       retries: 5
   postgres:
     container_name: hummingbot-postgres
-    image: postgres:16
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
     restart: unless-stopped
     environment:
       # These variables automatically create the user and database on first initialization
