@@ -23,8 +23,11 @@ from models.pagination import paginate_by_cursor
 from services.accounts_service import AccountsService
 from services.hyperliquid_protected_orders import (
     CLOID_PATTERN,
+    cancel_protected_stop,
     connector_account_address,
     lookup_order_by_cloid,
+    lookup_position,
+    place_protected_close,
     place_protected_order,
 )
 from services.trading_history_service import TradingHistoryService
@@ -56,6 +59,36 @@ class ProtectedHyperliquidRequest(BaseModel):
     orders: List[ProtectedOrderLeg] = Field(min_length=2, max_length=2)
 
 
+class ProtectedCloseLeg(BaseModel):
+    role: Literal["CLOSE"]
+    cloid: str = Field(pattern=CLOID_PATTERN)
+    side: Literal["BUY", "SELL"]
+    amount: str
+    reduce_only: Literal[True]
+    order_type: Dict[str, Any]
+
+
+class ProtectedCloseRequest(BaseModel):
+    request_id: str = Field(min_length=8, max_length=128)
+    executor_id: str = Field(pattern=r"^condor-real-[0-9a-f]{32}$")
+    controller_id: str = Field(min_length=1, max_length=128)
+    account_name: Literal["master_account"]
+    connector_name: Literal["hyperliquid_perpetual"]
+    trading_pair: str = Field(min_length=3, max_length=128)
+    grouping: Literal["na"]
+    order: ProtectedCloseLeg
+
+
+class ProtectedStopCancelRequest(BaseModel):
+    request_id: str = Field(min_length=8, max_length=128)
+    executor_id: str = Field(pattern=r"^condor-real-[0-9a-f]{32}$")
+    controller_id: str = Field(min_length=1, max_length=128)
+    account_name: Literal["master_account"]
+    connector_name: Literal["hyperliquid_perpetual"]
+    trading_pair: str = Field(min_length=3, max_length=128)
+    stop_cloid: str = Field(pattern=CLOID_PATTERN)
+
+
 @router.get("/hyperliquid/protected-orders/capabilities")
 async def get_hyperliquid_protected_order_capabilities(
     account_name: Literal["master_account"],
@@ -64,10 +97,14 @@ async def get_hyperliquid_protected_order_capabilities(
 ):
     connector = await accounts_service.get_connector_instance(account_name, connector_name)
     return {
-        "contract": "condor-hyperliquid-protected-v1",
+        "contract": "condor-hyperliquid-protected-v2",
         "grouping": "na",
         "mutation_posts": 1,
         "read_recovery": "orderStatus-by-cloid",
+        "entry_price_guard": "fresh-l2Book-5pct",
+        "close": "fresh-l2Book-5pct-reduce-only-ioc-by-cloid",
+        "stop_cancel": "cancelByCloid-after-flat",
+        "position_truth": "clearinghouseState",
         "account_address": connector_account_address(connector),
     }
 
@@ -90,6 +127,35 @@ async def get_hyperliquid_protected_order_status(
 ):
     connector = await accounts_service.get_connector_instance(account_name, connector_name)
     return await lookup_order_by_cloid(connector, cloid)
+
+
+@router.get("/hyperliquid/protected-orders/position")
+async def get_hyperliquid_protected_position(
+    account_name: Literal["master_account"],
+    connector_name: Literal["hyperliquid_perpetual"],
+    trading_pair: str,
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(account_name, connector_name)
+    return await lookup_position(connector, trading_pair)
+
+
+@router.post("/hyperliquid/protected-orders/close", status_code=status.HTTP_201_CREATED)
+async def place_hyperliquid_protected_close(
+    request: ProtectedCloseRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(request.account_name, request.connector_name)
+    return await place_protected_close(connector, request.model_dump())
+
+
+@router.post("/hyperliquid/protected-orders/cancel-stop")
+async def cancel_hyperliquid_protected_stop(
+    request: ProtectedStopCancelRequest,
+    accounts_service: AccountsService = Depends(get_accounts_service),
+):
+    connector = await accounts_service.get_connector_instance(request.account_name, request.connector_name)
+    return await cancel_protected_stop(connector, request.model_dump())
 
 
 # Trade Execution
